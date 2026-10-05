@@ -1,0 +1,1432 @@
+<!DOCTYPE html>
+<html lang="en" class="dark">
+<head>
+    <meta charset="UTF-8">
+    <meta name="viewport" content="width=device-width, initial-scale=1.0">
+    <title>FloodGuard Agent - Autonomous Disaster Response Ecosystem (Malaysia Edition)</title>
+    <!-- Tailwind CSS -->
+    <script src="https://cdn.tailwindcss.com"></script>
+    <script>
+        tailwind.config = {
+            darkMode: 'class',
+            theme: {
+                extend: {
+                    colors: {
+                        dark: {
+                            900: '#07090e',
+                            800: '#0f172a',
+                            700: '#1e293b',
+                            600: '#334155'
+                        },
+                        accent: {
+                            cyan: '#06b6d4',
+                            emerald: '#10b981',
+                            amber: '#f59e0b',
+                            rose: '#f43f5e',
+                            purple: '#8b5cf6'
+                        }
+                    }
+                }
+            }
+        }
+    </script>
+    <!-- Leaflet CSS & JS for Interactive Satellite Maps -->
+    <link rel="stylesheet" href="https://unpkg.com/leaflet@1.9.4/dist/leaflet.css" />
+    <script src="https://unpkg.com/leaflet@1.9.4/dist/leaflet.js"></script>
+    <!-- FontAwesome for Icons -->
+    <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.4.0/css/all.min.css">
+    <!-- Google Fonts -->
+    <link href="https://fonts.googleapis.com/css2?family=JetBrains+Mono:wght@400;500;700&family=Inter:wght@300;400;500;600;700&display=swap" rel="stylesheet">
+    <style>
+        body { font-family: 'Inter', sans-serif; }
+        .mono { font-family: 'JetBrains Mono', monospace; }
+        ::-webkit-scrollbar { width: 6px; height: 6px; }
+        ::-webkit-scrollbar-track { background: #0f172a; }
+        ::-webkit-scrollbar-thumb { background: #334155; border-radius: 3px; }
+        ::-webkit-scrollbar-thumb:hover { background: #475569; }
+        @keyframes pulseGlow {
+            0%, 100% { box-shadow: 0 0 15px rgba(6, 182, 212, 0.2); }
+            50% { box-shadow: 0 0 35px rgba(6, 182, 212, 0.7); }
+        }
+        @keyframes dangerPulse {
+            0% { transform: scale(1); box-shadow: 0 0 0 0 rgba(244, 63, 94, 0.8); }
+            70% { transform: scale(1.15); box-shadow: 0 0 0 16px rgba(244, 63, 94, 0); }
+            100% { transform: scale(1); box-shadow: 0 0 0 0 rgba(244, 63, 94, 0); }
+        }
+        .danger-pulse-icon {
+            animation: dangerPulse 1.8s infinite;
+        }
+        .agent-active { animation: pulseGlow 1.5s infinite; }
+        .leaflet-container { background: #07090e !important; }
+        .leaflet-tile-pane { filter: brightness(0.75) contrast(1.2) saturate(1.1); }
+    </style>
+</head>
+<body class="bg-dark-900 text-slate-100 min-h-screen flex flex-col selection:bg-cyan-500 selection:text-white">
+
+    <header class="border-b border-slate-800 bg-dark-800/90 backdrop-blur-md sticky top-0 z-50">
+        <div class="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 h-20 flex items-center justify-between">
+            <div class="flex items-center space-x-3">
+                <div class="w-12 h-12 rounded-2xl bg-gradient-to-tr from-cyan-600 via-emerald-500 to-purple-600 flex items-center justify-center shadow-lg shadow-cyan-500/20">
+                    <i class="fa-solid fa-shield-halved text-white text-xl"></i>
+                </div>
+                <div>
+                    <h1 class="font-bold text-xl tracking-wider bg-gradient-to-r from-cyan-400 via-emerald-400 to-purple-400 bg-clip-text text-transparent">FLOODGUARD AGENT</h1>
+                    <p class="text-xs text-slate-400 mono">Autonomous Disaster Response Ecosystem v3.7 (Malaysia)</p>
+                </div>
+            </div>
+            
+            <div class="flex items-center space-x-4">
+                <!-- Hierarchical State & Town Selector Menus -->
+                <div class="hidden md:flex items-center space-x-2 bg-slate-900 border border-slate-700/80 rounded-xl px-3.5 py-2 text-xs">
+                    <i class="fa-solid fa-map-location-dot text-cyan-400"></i>
+                    <div class="flex items-center space-x-2">
+                        <div>
+                            <select id="stateSelect" onchange="handleStateChange()" class="bg-transparent text-cyan-300 font-bold focus:outline-none cursor-pointer">
+                                <option value="perak">Perak</option>
+                                <option value="selangor">Selangor & KL</option>
+                                <option value="penang">Penang</option>
+                                <option value="johor">Johor</option>
+                                <option value="pahang">Pahang</option>
+                                <option value="kelantan">Kelantan</option>
+                                <option value="sarawak">Sarawak</option>
+                            </select>
+                        </div>
+                        <span class="text-slate-600">/</span>
+                        <div>
+                            <select id="regionSelect" onchange="changeRegion()" class="bg-transparent text-slate-200 font-semibold focus:outline-none cursor-pointer">
+                                <!-- Populated dynamically based on state (min 3 towns per state) -->
+                            </select>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- Submission Deck Trigger Button -->
+                <button onclick="openSubmissionModal()" class="px-4 py-2.5 rounded-xl bg-gradient-to-r from-amber-500 to-rose-500 hover:opacity-90 text-white text-xs font-bold shadow-lg shadow-amber-500/20 transition flex items-center space-x-2 animate-bounce">
+                    <i class="fa-solid fa-award"></i>
+                    <span>GenAI Challenge Deck</span>
+                </button>
+
+                <!-- Agent Status Indicator Light -->
+                <div id="headerStatusBadge" class="hidden md:flex items-center space-x-2 px-3.5 py-2 rounded-full bg-slate-900 border border-slate-700 text-xs">
+                    <span id="statusLightDot" class="w-3 h-3 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_#10b981]"></span>
+                    <span class="text-slate-300 mono">Status: <strong id="statusLightText" class="text-emerald-400">STANDBY</strong></span>
+                </div>
+
+                <button onclick="resetSystem()" class="px-3.5 py-2 rounded-xl bg-slate-800 hover:bg-slate-700 border border-slate-700 text-xs font-medium transition flex items-center space-x-1.5 text-slate-300">
+                    <i class="fa-solid fa-rotate-right"></i>
+                    <span class="hidden sm:inline">Reset</span>
+                </button>
+            </div>
+        </div>
+    </header>
+
+    <main class="flex-1 max-w-7xl w-full mx-auto p-6 sm:p-10 lg:p-12 space-y-12">
+
+        <!-- TOP GRID: Observation Feed & Reasoning Core -->
+        <div class="grid grid-cols-1 lg:grid-cols-12 gap-10">
+
+            <!-- SECTION 1: OBSERVATION FEED -->
+            <section class="lg:col-span-5 flex flex-col space-y-10">
+                
+                <!-- Ingestion Panel -->
+                <div class="bg-dark-800 rounded-3xl border border-slate-800 p-8 sm:p-10 shadow-2xl flex flex-col">
+                    <div class="flex items-center justify-between pb-5 border-b border-slate-700/60 mb-8">
+                        <div class="flex items-center space-x-3.5">
+                            <div class="w-12 h-12 rounded-2xl bg-cyan-950 border border-cyan-800 flex items-center justify-center text-cyan-400">
+                                <i class="fa-solid fa-satellite-dish text-lg"></i>
+                            </div>
+                            <div>
+                                <h2 class="font-bold text-lg text-slate-100">1. Observation Feed</h2>
+                                <p class="text-xs text-slate-400">Simulate sensory input for the AI agent</p>
+                            </div>
+                        </div>
+                        <span class="text-xs px-3 py-1 rounded-xl bg-cyan-950 text-cyan-400 border border-cyan-800/60 mono font-semibold">Multimodal</span>
+                    </div>
+
+                    <!-- Malaysian Emergency Scenarios -->
+                    <div class="mb-8">
+                        <label class="block text-xs font-semibold text-slate-300 mb-4 uppercase tracking-wider">Quick-Test Malaysian Scenarios:</label>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3.5">
+                            <button onclick="loadScenario('flashflood')" class="text-left p-4 rounded-2xl bg-slate-900 hover:bg-slate-700/60 border border-slate-700/80 transition group flex flex-col justify-between">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs font-bold text-cyan-400 group-hover:text-cyan-300">Flash Flood</span>
+                                    <span class="text-[10px] bg-cyan-950 text-cyan-400 px-2 py-0.5 rounded border border-cyan-800">Water</span>
+                                </div>
+                                <div class="text-[11px] text-slate-400">River level @ 5.8m (Danger)</div>
+                            </button>
+
+                            <button onclick="loadScenario('thunderstorm')" class="text-left p-4 rounded-2xl bg-slate-900 hover:bg-slate-700/60 border border-slate-700/80 transition group flex flex-col justify-between">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs font-bold text-amber-400 group-hover:text-amber-300">Thunderstorm</span>
+                                    <span class="text-[10px] bg-amber-950 text-amber-400 px-2 py-0.5 rounded border border-amber-800">Storm</span>
+                                </div>
+                                <div class="text-[11px] text-slate-400">Fallen tree blocks main corridor</div>
+                            </button>
+
+                            <button onclick="loadScenario('haze')" class="text-left p-4 rounded-2xl bg-slate-900 hover:bg-slate-700/60 border border-slate-700/80 transition group flex flex-col justify-between">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs font-bold text-purple-400 group-hover:text-purple-300">Hazardous Haze</span>
+                                    <span class="text-[10px] bg-purple-950 text-purple-400 px-2 py-0.5 rounded border border-purple-800">Air</span>
+                                </div>
+                                <div class="text-[11px] text-slate-400">API spiked to 215 (Unhealthy)</div>
+                            </button>
+
+                            <button onclick="loadScenario('outage')" class="text-left p-4 rounded-2xl bg-slate-900 hover:bg-slate-700/60 border border-slate-700/80 transition group flex flex-col justify-between">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs font-bold text-rose-400 group-hover:text-rose-300">Power Outage</span>
+                                    <span class="text-[10px] bg-rose-950 text-rose-400 px-2 py-0.5 rounded border border-rose-800">Grid</span>
+                                </div>
+                                <div class="text-[11px] text-slate-400">Substation failure at water plant</div>
+                            </button>
+
+                            <button onclick="loadScenario('fire')" class="text-left p-4 rounded-2xl bg-slate-900 hover:bg-slate-700/60 border border-slate-700/80 transition group flex flex-col justify-between">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs font-bold text-orange-400 group-hover:text-orange-300">Peatland Fire</span>
+                                    <span class="text-[10px] bg-orange-950 text-orange-400 px-2 py-0.5 rounded border border-orange-800">Fire</span>
+                                </div>
+                                <div class="text-[11px] text-slate-400">Smoke plume near residential zone</div>
+                            </button>
+
+                            <button onclick="loadScenario('landslide')" class="text-left p-4 rounded-2xl bg-slate-900 hover:bg-slate-700/60 border border-slate-700/80 transition group flex flex-col justify-between">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs font-bold text-yellow-400 group-hover:text-yellow-300">Hillside Slip</span>
+                                    <span class="text-[10px] bg-yellow-950 text-yellow-400 px-2 py-0.5 rounded border border-yellow-800">Slip</span>
+                                </div>
+                                <div class="text-[11px] text-slate-400">Slope movement near housing</div>
+                            </button>
+
+                            <button onclick="loadScenario('stormsurge')" class="text-left p-4 rounded-2xl bg-slate-900 hover:bg-slate-700/60 border border-slate-700/80 transition group flex flex-col justify-between">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs font-bold text-sky-400 group-hover:text-sky-300">Coastal Surge</span>
+                                    <span class="text-[10px] bg-sky-950 text-sky-400 px-2 py-0.5 rounded border border-sky-800">Surge</span>
+                                </div>
+                                <div class="text-[11px] text-slate-400">High tide + Northeast Monsoon wave</div>
+                            </button>
+
+                            <button onclick="loadScenario('dengue')" class="text-left p-4 rounded-2xl bg-slate-900 hover:bg-slate-700/60 border border-slate-700/80 transition group flex flex-col justify-between">
+                                <div class="flex items-center justify-between mb-2">
+                                    <span class="text-xs font-bold text-emerald-300 group-hover:text-emerald-200">Dengue Outbreak</span>
+                                    <span class="text-[10px] bg-emerald-950 text-emerald-400 px-2 py-0.5 rounded border border-emerald-800">Health</span>
+                                </div>
+                                <div class="text-[11px] text-slate-400">Stagnant post-flood vector risk</div>
+                            </button>
+                        </div>
+                    </div>
+
+                    <!-- Manual Ingestion Controls -->
+                    <div class="space-y-5 pt-6 border-t border-slate-700/60">
+                        <label class="block text-xs font-semibold text-slate-300 uppercase tracking-wider">Custom Manual Input Stream:</label>
+                        
+                        <div>
+                            <label class="block text-xs text-slate-400 mb-2">Input Type:</label>
+                            <select id="inputType" onchange="toggleInputFields()" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500">
+                                <option value="sensor">IoT Water / Sensor Telemetry</option>
+                                <option value="image">Multimodal Site Image Upload</option>
+                                <option value="sos">Citizen Distress SOS Message</option>
+                            </select>
+                        </div>
+
+                        <div id="sensorInputGroup" class="space-y-3">
+                            <div class="flex justify-between text-xs">
+                                <span class="text-slate-400">Water Level Sensor Reading:</span>
+                                <span id="sensorVal" class="mono text-amber-400 font-bold text-sm">5.5m</span>
+                            </div>
+                            <input type="range" id="sensorSlider" min="1.0" max="8.0" step="0.1" value="5.5" oninput="document.getElementById('sensorVal').innerText = this.value + 'm'" class="w-full accent-cyan-500 h-2 bg-slate-900 rounded-lg cursor-pointer">
+                        </div>
+
+                        <div id="imageInputGroup" class="hidden space-y-3">
+                            <div class="border-2 border-dashed border-slate-700 hover:border-cyan-500 rounded-2xl p-5 text-center cursor-pointer transition bg-slate-900/50" onclick="simulateImageUpload()">
+                                <i class="fa-solid fa-cloud-arrow-up text-3xl text-cyan-400 mb-2"></i>
+                                <p class="text-xs text-slate-200 font-medium">Upload Disaster Site Photo</p>
+                                <p class="text-[11px] text-slate-500">Supports JPEG, PNG up to 10MB</p>
+                            </div>
+                            <div id="uploadedImagePreview" class="hidden text-xs text-emerald-400 bg-emerald-950/40 p-3.5 rounded-xl border border-emerald-800/50 flex items-center space-x-2">
+                                <i class="fa-solid fa-circle-check text-base"></i>
+                                <span class="truncate">Ingested: <strong id="imgName">site_damage_scan.jpg</strong></span>
+                            </div>
+                        </div>
+
+                        <div id="sosInputGroup" class="hidden space-y-3">
+                            <textarea id="sosText" rows="3" class="w-full bg-slate-900 border border-slate-700 rounded-xl p-3.5 text-xs text-slate-200 focus:outline-none focus:border-cyan-500 placeholder-slate-600" placeholder="Type citizen distress SOS message..."></textarea>
+                        </div>
+
+                        <button onclick="triggerObservation()" class="w-full py-4 rounded-2xl bg-gradient-to-r from-cyan-600 via-emerald-600 to-purple-600 hover:opacity-95 text-white font-bold text-xs tracking-wider uppercase shadow-xl shadow-cyan-600/30 transition flex items-center justify-center space-x-2">
+                            <i class="fa-solid fa-play"></i>
+                            <span>Ingest & Run Autonomous Agent Loop</span>
+                        </button>
+                    </div>
+                </div>
+
+                <!-- Disaster Safety & Preparedness Guides (Malaysia) -->
+                <div class="bg-dark-800 rounded-3xl border border-slate-800 p-8 sm:p-10 shadow-2xl flex flex-col">
+                    <div class="flex items-center space-x-3.5 pb-5 border-b border-slate-700/60 mb-6">
+                        <div class="w-12 h-12 rounded-2xl bg-amber-950 border border-amber-800 flex items-center justify-center text-amber-400">
+                            <i class="fa-solid fa-book-open text-lg"></i>
+                        </div>
+                        <div>
+                            <h2 class="font-bold text-lg text-slate-100">Disaster Safety Guides</h2>
+                            <p class="text-xs text-slate-400">Standard operating guidelines for Malaysia</p>
+                        </div>
+                    </div>
+                    <div class="space-y-4 text-xs">
+                        <details class="group bg-slate-900 rounded-2xl p-4 border border-slate-700/80">
+                            <summary class="font-semibold text-cyan-400 cursor-pointer flex justify-between items-center">
+                                <span><i class="fa-solid fa-water mr-2"></i> Flash Flood Protocol</span>
+                                <i class="fa-solid fa-chevron-down text-xs text-slate-500 group-open:rotate-180 transition"></i>
+                            </summary>
+                            <p class="text-slate-300 mt-3 text-xs leading-relaxed">
+                                1. Turn off main electrical switches and gas valves.<br>
+                                2. Pack 'Beg Kecemasan' with IC, essential medication, and power banks.<br>
+                                3. Evacuate safely to designated PPS (Pusat Pemindahan Sementara) when instructed by NADMA.
+                            </p>
+                        </details>
+
+                        <details class="group bg-slate-900 rounded-2xl p-4 border border-slate-700/80">
+                            <summary class="font-semibold text-amber-400 cursor-pointer flex justify-between items-center">
+                                <span><i class="fa-solid fa-wind mr-2"></i> Severe Thunderstorm & Winds</span>
+                                <i class="fa-solid fa-chevron-down text-xs text-slate-500 group-open:rotate-180 transition"></i>
+                            </summary>
+                            <p class="text-slate-300 mt-3 text-xs leading-relaxed">
+                                1. Move away from glass windows and tall metallic structures.<br>
+                                2. Secure outdoor items prone to becoming projectiles during Sumatra squalls.<br>
+                                3. Pull over in a safe, open area if driving during torrential downpours.
+                            </p>
+                        </details>
+
+                        <details class="group bg-slate-900 rounded-2xl p-4 border border-slate-700/80">
+                            <summary class="font-semibold text-purple-400 cursor-pointer flex justify-between items-center">
+                                <span><i class="fa-solid fa-smog mr-2"></i> Hazardous Haze / API > 200</span>
+                                <i class="fa-solid fa-chevron-down text-xs text-slate-500 group-open:rotate-180 transition"></i>
+                            </summary>
+                            <p class="text-slate-300 mt-3 text-xs leading-relaxed">
+                                1. Restrict outdoor physical activities and wear N95 respirators outdoors.<br>
+                                2. Keep windows tightly shut; operate HEPA air purifiers indoors.<br>
+                                3. Stay hydrated and monitor official API reports via Department of Environment (DOE).
+                            </p>
+                        </details>
+                    </div>
+                </div>
+
+            </section>
+
+            <!-- SECTION 2: REASONING CORE & TOOL EXECUTION DASHBOARD -->
+            <section class="lg:col-span-7 flex flex-col space-y-10">
+                
+                <!-- Thinking Log & Threat Level -->
+                <div class="bg-dark-800 rounded-3xl border border-slate-800 p-8 sm:p-10 shadow-2xl flex flex-col h-[560px]">
+                    <div class="flex items-center justify-between pb-5 border-b border-slate-700/60 mb-6">
+                        <div class="flex items-center space-x-3.5">
+                            <div class="w-12 h-12 rounded-2xl bg-purple-950 border border-purple-800 flex items-center justify-center text-purple-400">
+                                <i class="fa-solid fa-brain text-lg"></i>
+                            </div>
+                            <div>
+                                <h2 class="font-bold text-lg text-slate-100">2. Agentic Reasoning Core</h2>
+                                <p class="text-xs text-slate-400">Step-by-step cognitive planning, inventory audit & threat analysis</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-3">
+                            <!-- Threat Level Badge -->
+                            <div id="threatLevelContainer" class="flex items-center space-x-2 px-3.5 py-2 rounded-xl bg-slate-900 border border-slate-700 text-xs font-bold">
+                                <span class="text-slate-400 font-normal">Threat:</span>
+                                <span id="threatLevelBadge" class="text-slate-400 mono">IDLE</span>
+                            </div>
+                            <div id="agentStateBadge" class="text-xs px-3.5 py-2 rounded-xl bg-slate-900 text-slate-400 border border-slate-700 mono font-semibold">Idle</div>
+                        </div>
+                    </div>
+
+                    <div id="thinkingLogBox" class="flex-1 bg-slate-950 rounded-2xl p-5 mono text-xs overflow-y-auto space-y-4 border border-slate-900/80">
+                        <div class="text-slate-500 italic">// Awaiting observation stream. Select a scenario or trigger ingestion to initialize agent reasoning loop...</div>
+                    </div>
+                </div>
+
+                <!-- SECTION 3: AUTONOMOUS EXECUTION DASHBOARD (Tool Mastery - Clickable) -->
+                <div class="bg-dark-800 rounded-3xl border border-slate-800 p-8 sm:p-12 shadow-2xl flex flex-col">
+                    <div class="flex items-center justify-between pb-6 border-b border-slate-700/60 mb-8">
+                        <div class="flex items-center space-x-4">
+                            <div class="w-14 h-14 rounded-2xl bg-amber-950 border border-amber-800 flex items-center justify-center text-amber-400 text-xl shadow-lg">
+                                <i class="fa-solid fa-wand-magic-sparkles"></i>
+                            </div>
+                            <div>
+                                <h2 class="font-bold text-xl text-slate-100">3. Autonomous Execution Dashboard</h2>
+                                <p class="text-xs sm:text-sm text-slate-400">Click any execution card to inspect live dispatch logs</p>
+                            </div>
+                        </div>
+                        <div class="flex items-center space-x-3 text-xs sm:text-sm bg-slate-900 px-4.5 py-2.5 rounded-2xl border border-slate-700 shadow-md">
+                            <span class="text-slate-400">Completed:</span>
+                            <span id="completedCount" class="font-bold text-cyan-400 mono text-lg">0/3</span>
+                        </div>
+                    </div>
+
+                    <div class="grid grid-cols-1 md:grid-cols-3 gap-6" id="toolCardsContainer">
+                        
+                        <!-- Tool 1: Emergency Broadcast -->
+                        <div id="toolCard1" onclick="openToolDetail(1)" class="bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-800 flex flex-col justify-between transition shadow-xl hover:border-cyan-500 cursor-pointer group">
+                            <div>
+                                <div class="flex items-center justify-between mb-4">
+                                    <div class="w-12 h-12 rounded-2xl bg-cyan-950/80 border border-cyan-800 flex items-center justify-center text-cyan-400 text-base shadow-md group-hover:scale-110 transition">
+                                        <i class="fa-solid fa-tower-broadcast"></i>
+                                    </div>
+                                    <span id="badge1" class="text-xs px-3.5 py-1.5 rounded-xl bg-slate-800 text-slate-300 mono font-bold">PENDING</span>
+                                </div>
+                                <h3 class="font-bold text-sm text-slate-100 mb-2">Emergency Broadcast Tool</h3>
+                                <p class="text-xs text-slate-400 mb-6 leading-relaxed">Auto-dispatching SMS alerts & NADMA warnings to at-risk community residents.</p>
+                            </div>
+                            <div id="output1" class="text-xs bg-slate-950 p-3.5 rounded-2xl border border-slate-800 text-slate-500 mono truncate shadow-inner">
+                                Ready for dispatch...
+                            </div>
+                        </div>
+
+                        <!-- Tool 2: GPS Route Optimizer -->
+                        <div id="toolCard2" onclick="openToolDetail(2)" class="bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-800 flex flex-col justify-between transition shadow-xl hover:border-emerald-500 cursor-pointer group">
+                            <div>
+                                <div class="flex items-center justify-between mb-4">
+                                    <div class="w-12 h-12 rounded-2xl bg-emerald-950/80 border border-emerald-800 flex items-center justify-center text-emerald-400 text-base shadow-md group-hover:scale-110 transition">
+                                        <i class="fa-solid fa-route"></i>
+                                    </div>
+                                    <span id="badge2" class="text-xs px-3.5 py-1.5 rounded-xl bg-slate-800 text-slate-300 mono font-bold">PENDING</span>
+                                </div>
+                                <h3 class="font-bold text-sm text-slate-100 mb-2">GPS Route Optimizer</h3>
+                                <p class="text-xs text-slate-400 mb-6 leading-relaxed">Re-routing rescue vans, buses, and boats around flooded roads and debris.</p>
+                            </div>
+                            <div id="output2" class="text-xs bg-slate-950 p-3.5 rounded-2xl border border-slate-800 text-slate-500 mono truncate shadow-inner">
+                                Ready for routing...
+                            </div>
+                        </div>
+
+                        <!-- Tool 3: Relief Inventory Allocator -->
+                        <div id="toolCard3" onclick="openToolDetail(3)" class="bg-slate-900 rounded-3xl p-6 sm:p-8 border border-slate-800 flex flex-col justify-between transition shadow-xl hover:border-amber-500 cursor-pointer group">
+                            <div>
+                                <div class="flex items-center justify-between mb-4">
+                                    <div class="w-12 h-12 rounded-2xl bg-amber-950/80 border border-amber-800 flex items-center justify-center text-amber-400 text-base shadow-md group-hover:scale-110 transition">
+                                        <i class="fa-solid fa-boxes-stacked"></i>
+                                    </div>
+                                    <span id="badge3" class="text-xs px-3.5 py-1.5 rounded-xl bg-slate-800 text-slate-300 mono font-bold">PENDING</span>
+                                </div>
+                                <h3 class="font-bold text-sm text-slate-100 mb-2">Relief Inventory Allocator</h3>
+                                <p class="text-xs text-slate-400 mb-6 leading-relaxed">Allocating food packs, utility boats, evacuation vans, and buses to PPS centers.</p>
+                            </div>
+                            <div id="output3" class="text-xs bg-slate-950 p-3.5 rounded-2xl border border-slate-800 text-slate-500 mono truncate shadow-inner">
+                                Ready for inventory sync...
+                            </div>
+                        </div>
+
+                    </div>
+                </div>
+
+            </section>
+
+        </div>
+
+        <!-- SECTION 4: SATELLITE DISASTER ZONE & ROUTE MAP (Repositioned at Bottom) -->
+        <section class="bg-dark-800 rounded-3xl border border-slate-800 p-8 sm:p-10 shadow-2xl flex flex-col">
+            <div class="flex flex-col sm:flex-row items-start sm:items-center justify-between pb-5 border-b border-slate-700/60 mb-6 gap-4">
+                <div class="flex items-center space-x-3.5">
+                    <div class="w-12 h-12 rounded-2xl bg-emerald-950 border border-emerald-800 flex items-center justify-center text-emerald-400">
+                        <i class="fa-solid fa-map-location-dot text-lg"></i>
+                    </div>
+                    <div>
+                        <h2 class="font-bold text-lg text-slate-100">4. Satellite Disaster Zone & Evacuation Map</h2>
+                        <p class="text-xs text-slate-400">High-definition satellite aerial imagery and route simulation</p>
+                    </div>
+                </div>
+                <div class="flex items-center space-x-3">
+                    <div class="flex bg-slate-900 p-1 rounded-xl border border-slate-700 text-xs">
+                        <button onclick="setMapLayer('satellite')" id="btnLayerSat" class="px-3 py-1.5 rounded-lg bg-cyan-600 text-white font-semibold transition">Satellite Aerial</button>
+                        <button onclick="setMapLayer('street')" id="btnLayerStreet" class="px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition">Standard Street</button>
+                    </div>
+                    <span id="mapRegionLabel" class="text-xs px-3.5 py-2 rounded-xl bg-slate-900 text-cyan-400 border border-slate-700 mono font-semibold">Sungai Siput Hub</span>
+                </div>
+            </div>
+
+            <div class="w-full h-[520px] rounded-2xl overflow-hidden border border-slate-700/80 relative shadow-inner">
+                <div id="map" class="w-full h-full z-10"></div>
+            </div>
+        </section>
+
+    </main>
+
+    <!-- Footer -->
+    <footer class="border-t border-slate-800 bg-dark-800/50 py-8 text-center text-xs text-slate-500 mono">
+        FloodGuard Agentic Ecosystem • Generative AI Challenge 2026 Submission Prototype (Malaysia)
+    </footer>
+
+    <!-- Tool Detail Inspection Modal -->
+    <div id="toolDetailModal" class="fixed inset-0 z-50 bg-slate-950/80 backdrop-blur-md flex items-center justify-center p-4 hidden">
+        <div class="bg-dark-800 border border-slate-700 rounded-3xl max-w-2xl w-full flex flex-col shadow-2xl overflow-hidden">
+            <div class="p-6 border-b border-slate-700 flex items-center justify-between bg-dark-900/50">
+                <div class="flex items-center space-x-3">
+                    <div id="modalToolIcon" class="w-10 h-10 rounded-xl bg-cyan-950 border border-cyan-800 flex items-center justify-center text-cyan-400 text-base">
+                        <i class="fa-solid fa-tower-broadcast"></i>
+                    </div>
+                    <div>
+                        <h3 id="modalToolTitle" class="font-bold text-base text-slate-100">Tool Execution Inspection</h3>
+                        <p class="text-xs text-slate-400 mono">Autonomous Agent Action Record</p>
+                    </div>
+                </div>
+                <button onclick="closeToolDetail()" class="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </div>
+            <div id="modalToolBody" class="p-6 sm:p-8 space-y-4 text-xs sm:text-sm text-slate-300">
+                <!-- Dynamically filled -->
+            </div>
+            <div class="p-6 border-t border-slate-700 bg-dark-900/50 flex justify-end">
+                <button onclick="closeToolDetail()" class="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 text-xs font-semibold transition">Close</button>
+            </div>
+        </div>
+    </div>
+
+    <!-- Challenge Submission & Briefing Deck Modal -->
+    <div id="submissionModal" class="fixed inset-0 z-50 bg-slate-950/85 backdrop-blur-md flex items-center justify-center p-4 hidden">
+        <div class="bg-dark-800 border border-slate-700 rounded-3xl max-w-4xl w-full max-h-[90vh] flex flex-col shadow-2xl overflow-hidden">
+            <!-- Modal Header -->
+            <div class="p-6 border-b border-slate-700/80 flex items-center justify-between bg-dark-900/50">
+                <div class="flex items-center space-x-3">
+                    <div class="w-10 h-10 rounded-xl bg-gradient-to-tr from-amber-500 to-rose-500 flex items-center justify-center text-white shadow-lg">
+                        <i class="fa-solid fa-file-shield text-base"></i>
+                    </div>
+                    <div>
+                        <h3 class="font-bold text-sm sm:text-base text-slate-100">GenAI Challenge 2026 - Project Brief & Submission Deck</h3>
+                        <p class="text-xs text-slate-400 mono">Theme: Engineering the Autonomous Future (Malaysia Edition)</p>
+                    </div>
+                </div>
+                <button onclick="closeSubmissionModal()" class="w-9 h-9 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-400 hover:text-white flex items-center justify-center transition">
+                    <i class="fa-solid fa-xmark text-base"></i>
+                </button>
+            </div>
+
+            <!-- Modal Tab Nav -->
+            <div class="flex border-b border-slate-700 bg-slate-900/60 px-6 text-xs overflow-x-auto">
+                <button onclick="switchTab('overview')" id="tabBtnOverview" class="py-3.5 px-4 font-semibold text-cyan-400 border-b-2 border-cyan-400 whitespace-nowrap transition">1. Project Overview & SDG</button>
+                <button onclick="switchTab('problem')" id="tabBtnProblem" class="py-3.5 px-4 font-medium text-slate-400 hover:text-slate-200 whitespace-nowrap transition">2. Problem & Target Audience</button>
+                <button onclick="switchTab('genai')" id="tabBtnGenai" class="py-3.5 px-4 font-medium text-slate-400 hover:text-slate-200 whitespace-nowrap transition">3. GenAI Tools & Vibe Coding</button>
+                <button onclick="switchTab('rubric')" id="tabBtnRubric" class="py-3.5 px-4 font-medium text-slate-400 hover:text-slate-200 whitespace-nowrap transition">4. Challenge Rubric & Pitch</button>
+            </div>
+
+            <!-- Modal Content Body -->
+            <div class="p-6 sm:p-8 overflow-y-auto space-y-6 flex-1 text-xs sm:text-sm text-slate-300">
+                
+                <!-- TAB 1: Overview -->
+                <div id="tabContentOverview" class="space-y-4">
+                    <div class="p-4 sm:p-5 rounded-2xl bg-cyan-950/30 border border-cyan-800/50">
+                        <h4 class="font-bold text-cyan-400 text-sm mb-1.5"><i class="fa-solid fa-shield-halved mr-2"></i>FloodGuard Agent Ecosystem</h4>
+                        <p class="text-slate-300 text-xs leading-relaxed">
+                            Transitioning from static conversational chatbots to an <strong>autonomous agentic ecosystem</strong> that observes multimodal disaster feeds (IoT water sensors, damage photos, citizen SOS), computes severity via reasoning cores, and autonomously executes multi-step relief actions across Malaysian districts with cross-district backup logistics.
+                        </p>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div class="bg-slate-900 p-4 rounded-2xl border border-slate-700/80">
+                            <span class="text-[10px] bg-emerald-950 text-emerald-400 px-2.5 py-0.5 rounded-lg border border-emerald-800 font-bold">SDG 11</span>
+                            <h5 class="font-semibold text-slate-200 mt-2 mb-1">Sustainable Cities & Communities</h5>
+                            <p class="text-xs text-slate-400">Building resilient river basins and urban corridors against monsoon flash floods and infrastructural disruptions.</p>
+                        </div>
+                        <div class="bg-slate-900 p-4 rounded-2xl border border-slate-700/80">
+                            <span class="text-[10px] bg-purple-950 text-purple-400 px-2.5 py-0.5 rounded-lg border border-purple-800 font-bold">SDG 13</span>
+                            <h5 class="font-semibold text-slate-200 mt-2 mb-1">Climate Action</h5>
+                            <p class="text-xs text-slate-400">Deploying real-time automated emergency broadcasting, GPS route optimization, and relief inventory allocation without human latency.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 2: Problem Statement -->
+                <div id="tabContentProblem" class="space-y-4 hidden">
+                    <div class="bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-700/80 space-y-3">
+                        <h4 class="font-bold text-amber-400 text-xs uppercase tracking-wider">Context & Pain Point</h4>
+                        <p class="text-xs text-slate-300 leading-relaxed">
+                            During monsoon seasons and climate emergencies in Malaysia, emergency responders face severe bottlenecks. When local district inventories or rescue vans run short, the agent autonomously queries adjacent district ledgers (e.g., dispatching 15 rescue vans from Ipoh to Sungai Siput) to guarantee zero supply shortages.
+                        </p>
+                    </div>
+                    <div class="grid grid-cols-1 sm:grid-cols-2 gap-4">
+                        <div class="bg-slate-900 p-4 rounded-2xl border border-slate-700/80">
+                            <h5 class="font-semibold text-cyan-400 text-xs mb-1">Target Audience</h5>
+                            <p class="text-xs text-slate-400">At-risk rural and urban communities, district disaster management committees (NADMA / JKM), and frontline emergency responders.</p>
+                        </div>
+                        <div class="bg-slate-900 p-4 rounded-2xl border border-slate-700/80">
+                            <h5 class="font-semibold text-rose-400 text-xs mb-1">Impact & Urgency</h5>
+                            <p class="text-xs text-slate-400">Eliminates human response latency during critical flash flood windows, preventing loss of life and securing timely medical & food aid at PPS centers.</p>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 3: GenAI Tools -->
+                <div id="tabContentGenai" class="space-y-4 hidden">
+                    <div class="bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-700/80 space-y-3">
+                        <h4 class="font-bold text-purple-400 text-xs uppercase tracking-wider">Generative AI Tools & Vibe Coding Integration</h4>
+                        <div class="space-y-2.5 text-xs">
+                            <div class="flex items-start space-x-2.5">
+                                <i class="fa-solid fa-check text-emerald-400 mt-0.5"></i>
+                                <div><strong class="text-slate-200">Google Gemini & Claude:</strong> Used for rapid prompt-to-code architecture (Vibe Coding 101), designing agentic logic loops, and synthesizing emergency SMS templates.</div>
+                            </div>
+                            <div class="flex items-start space-x-2.5">
+                                <i class="fa-solid fa-check text-emerald-400 mt-0.5"></i>
+                                <div><strong class="text-slate-200">Multimodal Ingestion Engine:</strong> Simulates computer vision analysis of disaster site photos and real-time IoT water level telemetry.</div>
+                            </div>
+                            <div class="flex items-start space-x-2.5">
+                                <i class="fa-solid fa-check text-emerald-400 mt-0.5"></i>
+                                <div><strong class="text-slate-200">Value Added:</strong> Reduced prototyping time by 80%, enabling high-fidelity interactive simulation maps (Leaflet + Tailwind) without traditional boilerplate coding.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+                <!-- TAB 4: Rubric & Pitch Guide -->
+                <div id="tabContentRubric" class="space-y-4 hidden">
+                    <div class="bg-slate-900 p-4 sm:p-5 rounded-2xl border border-slate-700/80 space-y-3">
+                        <h4 class="font-bold text-emerald-400 text-xs uppercase tracking-wider">Challenge Rubric Alignment (Max 100 Points)</h4>
+                        <div class="grid grid-cols-1 sm:grid-cols-2 gap-3 text-xs">
+                            <div class="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+                                <div class="font-semibold text-cyan-400">Agentic Ecosystem (20 pts)</div>
+                                <div class="text-slate-400 text-[11px] mt-1">Full autonomous pipeline from sensing to action execution.</div>
+                            </div>
+                            <div class="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+                                <div class="font-semibold text-purple-400">Innovation & Creativity (20 pts)</div>
+                                <div class="text-slate-400 text-[11px] mt-1">Unique translation of intent into real-world automated disaster response.</div>
+                            </div>
+                            <div class="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+                                <div class="font-semibold text-amber-400">Agentic Loop & Tool Mastery (20 pts)</div>
+                                <div class="text-slate-400 text-[11px] mt-1">Seamless multimodal ingestion and parallel tool orchestration.</div>
+                            </div>
+                            <div class="bg-slate-950 p-3.5 rounded-xl border border-slate-800">
+                                <div class="font-semibold text-emerald-400">Cohesiveness & Presentation (40 pts)</div>
+                                <div class="text-slate-400 text-[11px] mt-1">Unified user experience and clear live demonstration capability.</div>
+                            </div>
+                        </div>
+                    </div>
+                </div>
+
+            </div>
+
+            <!-- Modal Footer -->
+            <div class="p-6 border-t border-slate-700/80 bg-dark-900/50 flex flex-col sm:flex-row justify-between items-center gap-4 text-xs">
+                <span class="text-slate-400 mono">Official Submission Deadline: 14th August 2026</span>
+                <div class="flex items-center space-x-3">
+                    <button onclick="window.open('https://pscpen.com/genai-project-submission', '_blank')" class="px-5 py-2.5 rounded-xl bg-gradient-to-r from-cyan-600 to-emerald-600 text-white font-semibold shadow hover:opacity-95 transition">
+                        <i class="fa-solid fa-arrow-up-right-from-square mr-1.5"></i>Official Submission Link
+                    </button>
+                    <button onclick="closeSubmissionModal()" class="px-5 py-2.5 rounded-xl bg-slate-800 hover:bg-slate-700 text-slate-300 transition">Close</button>
+                </div>
+            </div>
+        </div>
+    </div>
+
+    <script>
+        let map;
+        let disasterMarker, reliefMarker1, reliefMarker2, routeLine;
+        let currentLayerMode = 'satellite'; // 'satellite' or 'street'
+        let satelliteTileLayer, streetTileLayer, referenceTileLayer;
+        let lastExecutionData = {
+            tool1: { title: "Emergency Broadcast Tool", status: "PENDING", text: "Ready for dispatch..." },
+            tool2: { title: "GPS Route Optimizer", status: "PENDING", text: "Ready for routing..." },
+            tool3: { title: "Relief Inventory Allocator", status: "PENDING", text: "Ready for inventory sync..." }
+        };
+
+        const statesData = {
+            perak: {
+                name: "Perak",
+                hubs: {
+                    sungaisiput: {
+                        name: "Sungai Siput",
+                        lat: 4.8214,
+                        lng: 101.0711,
+                        disasterCoords: [4.8280, 101.0650],
+                        relief1: [4.8150, 101.0820],
+                        relief2: [4.8350, 101.0900],
+                        disasterName: "Sungai Siput River Sensor #04",
+                        reliefName1: "Dewan Orang Ramai PPS",
+                        reliefName2: "SK Sungai Siput Utara Shelter",
+                        backupHub: "Ipoh"
+                    },
+                    ipoh: {
+                        name: "Ipoh (Kinta Valley)",
+                        lat: 4.5975,
+                        lng: 101.0901,
+                        disasterCoords: [4.6050, 101.0820],
+                        relief1: [4.5880, 101.1020],
+                        relief2: [4.6150, 101.0750],
+                        disasterName: "Sungai Kinta Flood Monitor Zone",
+                        reliefName1: "Stadium Indera Mulia PPS",
+                        reliefName2: "SMK Anderson Shelter",
+                        backupHub: "Taiping"
+                    },
+                    taiping: {
+                        name: "Taiping",
+                        lat: 4.8500,
+                        lng: 100.7400,
+                        disasterCoords: [4.8580, 100.7320],
+                        relief1: [4.8420, 100.7500],
+                        relief2: [4.8650, 100.7250],
+                        disasterName: "Bukit Larut Foothills Sensor",
+                        reliefName1: "Dewan Perbandaran Taiping PPS",
+                        reliefName2: "SK King Edward VII Shelter",
+                        backupHub: "Ipoh"
+                    },
+                    telukintan: {
+                        name: "Teluk Intan",
+                        lat: 4.0274,
+                        lng: 101.0182,
+                        disasterCoords: [4.0340, 101.0250],
+                        relief1: [4.0190, 101.0080],
+                        relief2: [4.0420, 101.0320],
+                        disasterName: "Menara Condong Perak River Pier",
+                        reliefName1: "Dewan Perbandaran Teluk Intan PPS",
+                        reliefName2: "SMK Horley Methodist Shelter",
+                        backupHub: "Ipoh"
+                    }
+                }
+            },
+            selangor: {
+                name: "Selangor & KL",
+                hubs: {
+                    kualalumpur: {
+                        name: "Kuala Lumpur (Jalan Klang Lama)",
+                        lat: 3.1000,
+                        lng: 101.6700,
+                        disasterCoords: [3.1080, 101.6750],
+                        relief1: [3.0920, 101.6600],
+                        relief2: [3.1150, 101.6850],
+                        disasterName: "Klang River Flash Flood Basin",
+                        reliefName1: "Dewan Serbaguna Seputeh PPS",
+                        reliefName2: "SK Taman Desa Shelter",
+                        backupHub: "Shah Alam"
+                    },
+                    shahalam: {
+                        name: "Shah Alam",
+                        lat: 3.0738,
+                        lng: 101.5183,
+                        disasterCoords: [3.0820, 101.5250],
+                        relief1: [3.0650, 101.5050],
+                        relief2: [3.0900, 101.5350],
+                        disasterName: "Sungai Damansara Basin Monitor",
+                        reliefName1: "Dewan MBSA Seksyen 19 PPS",
+                        reliefName2: "SMK Seksyen 11 Shelter",
+                        backupHub: "Klang Town"
+                    },
+                    klang: {
+                        name: "Klang Town",
+                        lat: 3.0456,
+                        lng: 101.4453,
+                        disasterCoords: [3.0520, 101.4520],
+                        relief1: [3.0380, 101.4350],
+                        relief2: [3.0600, 101.4650],
+                        disasterName: "Sungai Klang Tidal Gate Monitor",
+                        reliefName1: "Dewan Hamzah Klang PPS",
+                        reliefName2: "SK Tengku Ampuan Jemaah Shelter",
+                        backupHub: "Shah Alam"
+                    },
+                    kajang: {
+                        name: "Kajang & Semenyih",
+                        lat: 2.9935,
+                        lng: 101.7874,
+                        disasterCoords: [3.0010, 101.7940],
+                        relief1: [2.9850, 101.7780],
+                        relief2: [3.0100, 101.8020],
+                        disasterName: "Sungai Langat Basin Sensor",
+                        reliefName1: "Dewan MPKj Kajang PPS",
+                        reliefName2: "SMK Jalan Bukit Shelter",
+                        backupHub: "Kuala Lumpur"
+                    }
+                }
+            },
+            penang: {
+                name: "Penang",
+                hubs: {
+                    penang: {
+                        name: "Georgetown",
+                        lat: 5.4164,
+                        lng: 100.3317,
+                        disasterCoords: [5.4200, 100.3280],
+                        relief1: [5.4100, 100.3400],
+                        relief2: [5.4300, 100.3150],
+                        disasterName: "Jalan Penang Flash Flood Zone",
+                        reliefName1: "Dewan Bandaran Georgetown PPS",
+                        reliefName2: "St. Xavier Institution Shelter",
+                        backupHub: "Butterworth"
+                    },
+                    butterworth: {
+                        name: "Butterworth (Seberang Perai)",
+                        lat: 5.3990,
+                        lng: 100.3636,
+                        disasterCoords: [5.4060, 100.3700],
+                        relief1: [5.3900, 100.3550],
+                        relief2: [5.4150, 100.3800],
+                        disasterName: "Sungai Perai Estuary Monitor",
+                        reliefName1: "Dewan Dato' Haji Ahmad Badawi PPS",
+                        reliefName2: "SMK Bagan Jaya Shelter",
+                        backupHub: "Bukit Mertajam"
+                    },
+                    bukitmertajam: {
+                        name: "Bukit Mertajam",
+                        lat: 5.3601,
+                        lng: 100.4703,
+                        disasterCoords: [5.3670, 100.4770],
+                        relief1: [5.3520, 100.4620],
+                        relief2: [5.3750, 100.4850],
+                        disasterName: "Cherok Tok Kun Flash Flood Sensor",
+                        reliefName1: "Dewan Masyarakat BM PPS",
+                        reliefName2: "SMK Tinggi Bukit Mertajam Shelter",
+                        backupHub: "Butterworth"
+                    },
+                    balikpulau: {
+                        name: "Balik Pulau",
+                        lat: 5.3533,
+                        lng: 100.2407,
+                        disasterCoords: [5.3600, 100.2470],
+                        relief1: [5.3450, 100.2320],
+                        relief2: [5.3700, 100.2550],
+                        disasterName: "Sungai Air Itam Foothill Sensor",
+                        reliefName1: "Dewan Daerah Barat Daya PPS",
+                        reliefName2: "SMK Seri Balik Pulau Shelter",
+                        backupHub: "Georgetown"
+                    }
+                }
+            },
+            johor: {
+                name: "Johor",
+                hubs: {
+                    johorbahru: {
+                        name: "Johor Bahru",
+                        lat: 1.4927,
+                        lng: 103.7414,
+                        disasterCoords: [1.4850, 103.7500],
+                        relief1: [1.5020, 103.7300],
+                        relief2: [1.4750, 103.7650],
+                        disasterName: "Sungai Skudai Basin Monitor",
+                        reliefName1: "Dewan Raya Kampong Melayu PPS",
+                        reliefName2: "SK Bandar Baru UDA Shelter",
+                        backupHub: "Kluang"
+                    },
+                    muar: {
+                        name: "Muar",
+                        lat: 2.0449,
+                        lng: 102.5689,
+                        disasterCoords: [2.0520, 102.5750],
+                        relief1: [2.0350, 102.5550],
+                        relief2: [2.0620, 102.5850],
+                        disasterName: "Sungai Muar Flood Gate",
+                        reliefName1: "Dewan Jubli Intan Muar PPS",
+                        reliefName2: "SK Bandar Maharani Shelter",
+                        backupHub: "Batu Pahat"
+                    },
+                    batupahat: {
+                        name: "Batu Pahat",
+                        lat: 1.8465,
+                        lng: 102.9281,
+                        disasterCoords: [1.8530, 102.9350],
+                        relief1: [1.8380, 102.9200],
+                        relief2: [1.8620, 102.9450],
+                        disasterName: "Sungai Simpang Kiri Flood Monitor",
+                        reliefName1: "Dewan Orang Ramai BP PPS",
+                        reliefName2: "SMK Tinggi Batu Pahat Shelter",
+                        backupHub: "Muar"
+                    },
+                    kluang: {
+                        name: "Kluang",
+                        lat: 2.0267,
+                        lng: 103.3175,
+                        disasterCoords: [2.0340, 103.3240],
+                        relief1: [2.0180, 103.3090],
+                        relief2: [2.0420, 103.3350],
+                        disasterName: "Sungai Mengkibol Flood Basin",
+                        reliefName1: "Dewan Jubli Intan Kluang PPS",
+                        reliefName2: "SMK Tinggi Kluang Shelter",
+                        backupHub: "Johor Bahru"
+                    }
+                }
+            },
+            pahang: {
+                name: "Pahang",
+                hubs: {
+                    kuantan: {
+                        name: "Kuantan",
+                        lat: 3.8126,
+                        lng: 103.3256,
+                        disasterCoords: [3.8200, 103.3350],
+                        relief1: [3.8050, 103.3100],
+                        relief2: [3.8300, 103.3450],
+                        disasterName: "Kuantan River Estuary Sensor",
+                        reliefName1: "Sukpa Indoor Stadium PPS",
+                        reliefName2: "SMK Bukit Setongkol Shelter",
+                        backupHub: "Temerloh"
+                    },
+                    temerloh: {
+                        name: "Temerloh",
+                        lat: 3.4497,
+                        lng: 102.4148,
+                        disasterCoords: [3.4560, 102.4210],
+                        relief1: [3.4400, 102.4050],
+                        relief2: [3.4650, 102.4300],
+                        disasterName: "Pahang River Basin Level @ Mentakab",
+                        reliefName1: "Dewan Tun Razak Temerloh PPS",
+                        reliefName2: "SMK Abu Bakar Shelter",
+                        backupHub: "Kuantan"
+                    },
+                    bentong: {
+                        name: "Bentong",
+                        lat: 3.5167,
+                        lng: 101.9000,
+                        disasterCoords: [3.5230, 101.9070],
+                        relief1: [3.5080, 101.8920],
+                        relief2: [3.5320, 101.9150],
+                        disasterName: "Sungai Bentong Upstream Sensor",
+                        reliefName1: "Dewan Perbandaran Bentong PPS",
+                        reliefName2: "SMK Ketari Shelter",
+                        backupHub: "Temerloh"
+                    },
+                    pekan: {
+                        name: "Pekan",
+                        lat: 3.4833,
+                        lng: 103.4000,
+                        disasterCoords: [3.4900, 103.4070],
+                        relief1: [3.4750, 103.3920],
+                        relief2: [3.4980, 103.4150],
+                        disasterName: "Pahang River Estuary Surge Monitor",
+                        reliefName1: "Dewan Konvensyen Sultan Ahmad Shah PPS",
+                        reliefName2: "SMK Dato' Mahmud Mat Shelter",
+                        backupHub: "Kuantan"
+                    }
+                }
+            },
+            kelantan: {
+                name: "Kelantan",
+                hubs: {
+                    kotabharu: {
+                        name: "Kota Bharu",
+                        lat: 6.1254,
+                        lng: 102.2381,
+                        disasterCoords: [6.1350, 102.2450],
+                        relief1: [6.1150, 102.2250],
+                        relief2: [6.1450, 102.2600],
+                        disasterName: "Sungai Kelantan Basin Watch (Rantau Panjang)",
+                        reliefName1: "Kompleks Belia dan Sukan Panji PPS",
+                        reliefName2: "SMK Sultan Ismail Shelter",
+                        backupHub: "Pasir Mas"
+                    },
+                    pasirmas: {
+                        name: "Pasir Mas",
+                        lat: 6.1042,
+                        lng: 102.1408,
+                        disasterCoords: [6.1120, 102.1480],
+                        relief1: [6.0950, 102.1300],
+                        relief2: [6.1200, 102.1550],
+                        disasterName: "Sungai Golok Border Overflow Sensor",
+                        reliefName1: "Dewan Daeng Abdul Rahman PPS",
+                        reliefName2: "SK Pasir Mas 1 Shelter",
+                        backupHub: "Kota Bharu"
+                    },
+                    wakafbharu: {
+                        name: "Wakaf Bharu (Tumpat)",
+                        lat: 6.1333,
+                        lng: 102.2167,
+                        disasterCoords: [6.1400, 102.2230],
+                        relief1: [6.1250, 102.2080],
+                        relief2: [6.1480, 102.2320],
+                        disasterName: "Delta Kelantan River Mouth Monitor",
+                        reliefName1: "Dewan Jajahan Tumpat PPS",
+                        reliefName2: "SK Wakaf Bharu Shelter",
+                        backupHub: "Kota Bharu"
+                    },
+                    guaumusang: {
+                        name: "Gua Musang",
+                        lat: 4.8833,
+                        lng: 101.9667,
+                        disasterCoords: [4.8900, 101.9730],
+                        relief1: [4.8750, 101.9580],
+                        relief2: [4.8980, 101.9820],
+                        disasterName: "Sungai Galas Upstream Station",
+                        reliefName1: "Dewan Semai Bakti Felda Chiku PPS",
+                        reliefName2: "SMK Tengku Indra Petra Shelter",
+                        backupHub: "Kuala Krai"
+                    }
+                }
+            },
+            sarawak: {
+                name: "Sarawak",
+                hubs: {
+                    kuching: {
+                        name: "Kuching",
+                        lat: 1.5533,
+                        lng: 110.3592,
+                        disasterCoords: [1.5620, 110.3480],
+                        relief1: [1.5400, 110.3700],
+                        relief2: [1.5700, 110.3350],
+                        disasterName: "Sungai Sarawak Tidal Monitor",
+                        reliefName1: "Stadium Perpaduan Petra Jaya PPS",
+                        reliefName2: "SK Rakyat Tupong Shelter",
+                        backupHub: "Samarahan"
+                    },
+                    miri: {
+                        name: "Miri",
+                        lat: 4.3995,
+                        lng: 113.9914,
+                        disasterCoords: [4.4060, 113.9980],
+                        relief1: [4.3900, 113.9800],
+                        relief2: [4.4150, 114.0050],
+                        disasterName: "Miri River Basin Flood Sensor",
+                        reliefName1: "Dewan Suarah Miri PPS",
+                        reliefName2: "SMK St. Columba Shelter",
+                        backupHub: "Bintulu"
+                    },
+                    sibu: {
+                        name: "Sibu",
+                        lat: 2.3000,
+                        lng: 111.8167,
+                        disasterCoords: [2.3070, 111.8230],
+                        relief1: [2.2920, 111.8080],
+                        relief2: [2.3150, 111.8320],
+                        disasterName: "Rajang River Delta Flood Sensor",
+                        reliefName1: "Sibu Indoor Stadium PPS",
+                        reliefName2: "SMK Sacred Heart Shelter",
+                        backupHub: "Kuching"
+                    },
+                    bintulu: {
+                        name: "Bintulu",
+                        lat: 3.1667,
+                        lng: 113.0333,
+                        disasterCoords: [3.1730, 113.0400],
+                        relief1: [3.1580, 113.0250],
+                        relief2: [3.1820, 113.0480],
+                        disasterName: "Kemena River Coastal Flood Station",
+                        reliefName1: "Dewan Suarah Bintulu PPS",
+                        reliefName2: "SMK Bintulu Shelter",
+                        backupHub: "Miri"
+                    }
+                }
+            }
+        };
+
+        function handleStateChange() {
+            const stateKey = document.getElementById('stateSelect').value;
+            const regionSelect = document.getElementById('regionSelect');
+            regionSelect.innerHTML = '';
+
+            const hubs = statesData[stateKey].hubs;
+            for (const [hubKey, hubObj] of Object.entries(hubs)) {
+                const opt = document.createElement('option');
+                opt.value = hubKey;
+                opt.innerText = hubObj.name;
+                regionSelect.appendChild(opt);
+            }
+
+            // Automatically load first hub of the selected state
+            const firstHubKey = Object.keys(hubs)[0];
+            initMap(stateKey, firstHubKey);
+            resetSystem();
+        }
+
+        function initMap(stateKey = 'perak', hubKey = 'sungaisiput') {
+            const reg = statesData[stateKey].hubs[hubKey];
+            document.getElementById('mapRegionLabel').innerText = `${reg.name}, ${statesData[stateKey].name}`;
+
+            if (map) {
+                map.remove();
+            }
+
+            map = L.map('map', { zoomControl: false }).setView([reg.lat, reg.lng], 14);
+            
+            satelliteTileLayer = L.tileLayer('https://server.arcgisonline.com/ArcGIS/rest/services/World_Imagery/MapServer/tile/{z}/{y}/{x}', {
+                attribution: 'Tiles &copy; Esri &mdash; Source: Esri, i-cubed, USDA, USGS, AEX, GeoEye, Getmapping, Aerogrid, IGN, IGP, swisstopo',
+                maxZoom: 19
+            });
+
+            referenceTileLayer = L.tileLayer('https://services.arcgisonline.com/ArcGIS/rest/services/Reference/World_Boundaries_and_Places/MapServer/tile/{z}/{y}/{x}', {
+                maxZoom: 19,
+                opacity: 0.85
+            });
+
+            streetTileLayer = L.tileLayer('https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png', {
+                attribution: '&copy; OpenStreetMap contributors',
+                maxZoom: 19
+            });
+
+            if (currentLayerMode === 'satellite') {
+                satelliteTileLayer.addTo(map);
+                referenceTileLayer.addTo(map);
+            } else {
+                streetTileLayer.addTo(map);
+            }
+
+            L.control.zoom({ position: 'topright' }).addTo(map);
+
+            const disasterIcon = L.divIcon({
+                className: 'custom-div-icon',
+                html: '<div class="danger-pulse-icon" style="background-color: #f43f5e; width: 32px; height: 32px; border-radius: 50%; border: 3px solid #fff; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 13px; box-shadow: 0 0 20px #f43f5e;"><i class="fa-solid fa-triangle-exclamation"></i></div>',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+            });
+            disasterMarker = L.marker(reg.disasterCoords, { icon: disasterIcon }).addTo(map)
+                .bindPopup(`<b style="color:#000;"><i class="fa-solid fa-triangle-exclamation text-rose-500 mr-1"></i>${reg.disasterName}</b><br>Status: Critical / Hazard Alert`);
+
+            const reliefIcon = L.divIcon({
+                className: 'custom-div-icon',
+                html: '<div style="background-color: #10b981; width: 32px; height: 32px; border-radius: 50%; border: 3px solid #fff; display: flex; align-items: center; justify-content: center; color: #fff; font-size: 13px; box-shadow: 0 0 15px #10b981;"><i class="fa-solid fa-house-chimney-medical"></i></div>',
+                iconSize: [32, 32],
+                iconAnchor: [16, 16]
+            });
+            reliefMarker1 = L.marker(reg.relief1, { icon: reliefIcon }).addTo(map)
+                .bindPopup(`<b style="color:#000;"><i class="fa-solid fa-house-chimney-medical text-emerald-600 mr-1"></i>${reg.reliefName1}</b><br>PPS Active (Capacity 70%)`);
+
+            reliefMarker2 = L.marker(reg.relief2, { icon: reliefIcon }).addTo(map)
+                .bindPopup(`<b style="color:#000;"><i class="fa-solid fa-house-chimney-medical text-emerald-600 mr-1"></i>${reg.reliefName2}</b><br>PPS Active (Capacity 40%)`);
+
+            routeLine = L.polyline([
+                reg.disasterCoords,
+                [reg.lat, reg.lng],
+                reg.relief1
+            ], { color: '#06b6d4', weight: 5, dashArray: '8, 8' }).addTo(map);
+        }
+
+        function setMapLayer(mode) {
+            currentLayerMode = mode;
+            const btnSat = document.getElementById('btnLayerSat');
+            const btnStreet = document.getElementById('btnLayerStreet');
+
+            if (mode === 'satellite') {
+                btnSat.className = "px-3 py-1.5 rounded-lg bg-cyan-600 text-white font-semibold transition";
+                btnStreet.className = "px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition";
+                if (map) {
+                    if (streetTileLayer) map.removeLayer(streetTileLayer);
+                    satelliteTileLayer.addTo(map);
+                    referenceTileLayer.addTo(map);
+                }
+            } else {
+                btnStreet.className = "px-3 py-1.5 rounded-lg bg-cyan-600 text-white font-semibold transition";
+                btnSat.className = "px-3 py-1.5 rounded-lg text-slate-400 hover:text-white transition";
+                if (map) {
+                    if (satelliteTileLayer) map.removeLayer(satelliteTileLayer);
+                    if (referenceTileLayer) map.removeLayer(referenceTileLayer);
+                    streetTileLayer.addTo(map);
+                }
+            }
+        }
+
+        window.addEventListener('DOMContentLoaded', () => {
+            // Initialize state dropdown options and default to Perak -> Sungai Siput
+            const stateSelect = document.getElementById('stateSelect');
+            stateSelect.value = 'perak';
+            handleStateChange();
+        });
+
+        function changeRegion() {
+            const stateKey = document.getElementById('stateSelect').value;
+            const hubKey = document.getElementById('regionSelect').value;
+            initMap(stateKey, hubKey);
+            resetSystem();
+        }
+
+        function openSubmissionModal() {
+            document.getElementById('submissionModal').classList.remove('hidden');
+        }
+
+        function closeSubmissionModal() {
+            document.getElementById('submissionModal').classList.add('hidden');
+        }
+
+        function switchTab(tabName) {
+            const tabs = ['overview', 'problem', 'genai', 'rubric'];
+            tabs.forEach(t => {
+                document.getElementById(`tabContent${t.charAt(0).toUpperCase() + t.slice(1)}`).classList.add('hidden');
+                document.getElementById(`tabBtn${t.charAt(0).toUpperCase() + t.slice(1)}`).className = "py-3.5 px-4 font-medium text-slate-400 hover:text-slate-200 whitespace-nowrap transition";
+            });
+            document.getElementById(`tabContent${tabName.charAt(0).toUpperCase() + tabName.slice(1)}`).classList.remove('hidden');
+            document.getElementById(`tabBtn${tabName.charAt(0).toUpperCase() + tabName.slice(1)}`).className = "py-3.5 px-4 font-semibold text-cyan-400 border-b-2 border-cyan-400 whitespace-nowrap transition";
+        }
+
+        function openToolDetail(id) {
+            const modal = document.getElementById('toolDetailModal');
+            const title = document.getElementById('modalToolTitle');
+            const body = document.getElementById('modalToolBody');
+            const icon = document.getElementById('modalToolIcon');
+
+            const tool = lastExecutionData[`tool${id}`];
+            title.innerText = tool.title;
+
+            if (id === 1) {
+                icon.innerHTML = '<i class="fa-solid fa-tower-broadcast"></i>';
+                body.innerHTML = `
+                    <div class="space-y-3">
+                        <div class="flex justify-between text-xs bg-slate-900 p-3 rounded-xl border border-slate-700">
+                            <span class="text-slate-400">Execution Status:</span>
+                            <span class="text-emerald-400 font-bold">${tool.status}</span>
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed"><strong>Broadcast Payload:</strong> ${tool.text}</p>
+                        <div class="bg-slate-950 p-4 rounded-xl border border-slate-900 text-xs font-mono space-y-1.5 text-cyan-300">
+                            <div>[SMS GATEWAY] Telco towers pinged: Maxis, CelcomDigi, U Mobile</div>
+                            <div>[NADMA API] Official Warning Bulletin #2026-MY dispatched</div>
+                            <div>[RECIPIENTS] 2,840 registered devices in geofenced perimeter</div>
+                        </div>
+                    </div>
+                `;
+            } else if (id === 2) {
+                icon.innerHTML = '<i class="fa-solid fa-route"></i>';
+                body.innerHTML = `
+                    <div class="space-y-3">
+                        <div class="flex justify-between text-xs bg-slate-900 p-3 rounded-xl border border-slate-700">
+                            <span class="text-slate-400">Execution Status:</span>
+                            <span class="text-emerald-400 font-bold">${tool.status}</span>
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed"><strong>Route Optimization:</strong> ${tool.text}</p>
+                        <div class="bg-slate-950 p-4 rounded-xl border border-slate-900 text-xs font-mono space-y-1.5 text-emerald-300">
+                            <div>[GPS ENGINE] Obstruction cleared via dynamic routing algorithm</div>
+                            <div>[CONVOY] Evacuation vans and utility buses directed via Jalan Bypass</div>
+                            <div>[ESTIMATED ETA] 12 minutes to designated PPS relief center</div>
+                        </div>
+                    </div>
+                `;
+            } else if (id === 3) {
+                icon.innerHTML = '<i class="fa-solid fa-boxes-stacked"></i>';
+                body.innerHTML = `
+                    <div class="space-y-3">
+                        <div class="flex justify-between text-xs bg-slate-900 p-3 rounded-xl border border-slate-700">
+                            <span class="text-slate-400">Execution Status:</span>
+                            <span class="text-emerald-400 font-bold">${tool.status}</span>
+                        </div>
+                        <p class="text-xs text-slate-300 leading-relaxed"><strong>Inventory Allocation & Backup:</strong> ${tool.text}</p>
+                        <div class="bg-slate-950 p-4 rounded-xl border border-slate-900 text-xs font-mono space-y-1.5 text-amber-300">
+                            <div>[LOGISTICS LEDGER] Local district warehouse sync & cross-district backup active</div>
+                            <div>[VEHICLE DISPATCH] Vans, Evacuation Buses, and Utility Boats locked</div>
+                            <div>[SUPPLY UNITS] Food packs, drinking water, and backup convoys secured</div>
+                        </div>
+                    </div>
+                `;
+            }
+
+            modal.classList.remove('hidden');
+        }
+
+        function closeToolDetail() {
+            document.getElementById('toolDetailModal').classList.add('hidden');
+        }
+
+        function toggleInputFields() {
+            const type = document.getElementById('inputType').value;
+            document.getElementById('sensorInputGroup').classList.toggle('hidden', type !== 'sensor');
+            document.getElementById('imageInputGroup').classList.toggle('hidden', type !== 'image');
+            document.getElementById('sosInputGroup').classList.toggle('hidden', type !== 'sos');
+        }
+
+        function simulateImageUpload() {
+            document.getElementById('uploadedImagePreview').classList.remove('hidden');
+            document.getElementById('imgName').innerText = "site_scan_" + Math.floor(Math.random() * 9000 + 1000) + ".jpg";
+        }
+
+        function setAgentStatus(status, type = 'standby') {
+            const dot = document.getElementById('statusLightDot');
+            const txt = document.getElementById('statusLightText');
+            const badge = document.getElementById('agentStateBadge');
+
+            txt.innerText = status;
+            badge.innerText = status;
+
+            if (type === 'standby') {
+                dot.className = "w-3 h-3 rounded-full bg-emerald-500 animate-pulse shadow-[0_0_10px_#10b981]";
+                txt.className = "text-emerald-400";
+                badge.className = "text-xs px-3.5 py-2 rounded-xl bg-slate-900 text-emerald-400 border border-slate-700 mono font-semibold";
+            } else if (type === 'thinking') {
+                dot.className = "w-3 h-3 rounded-full bg-amber-500 animate-ping shadow-[0_0_15px_#f59e0b]";
+                txt.className = "text-amber-400";
+                badge.className = "text-xs px-3.5 py-2 rounded-xl bg-amber-950 text-amber-400 border border-amber-800 mono font-semibold animate-pulse";
+            } else if (type === 'executing') {
+                dot.className = "w-3 h-3 rounded-full bg-cyan-500 animate-pulse shadow-[0_0_15px_#06b6d4]";
+                txt.className = "text-cyan-400";
+                badge.className = "text-xs px-3.5 py-2 rounded-xl bg-cyan-950 text-cyan-400 border border-cyan-800 mono font-semibold animate-pulse";
+            } else if (type === 'complete') {
+                dot.className = "w-3 h-3 rounded-full bg-emerald-400 shadow-[0_0_10px_#10b981]";
+                txt.className = "text-emerald-300";
+                badge.className = "text-xs px-3.5 py-2 rounded-xl bg-emerald-950 text-emerald-300 border border-emerald-700 mono font-semibold";
+            }
+        }
+
+        function setThreatLevel(level, colorClass, bgClass) {
+            const threatBadge = document.getElementById('threatLevelBadge');
+            threatBadge.innerText = level;
+            threatBadge.className = `${colorClass} mono font-bold`;
+            document.getElementById('threatLevelContainer').className = `flex items-center space-x-2 px-3.5 py-2 rounded-xl ${bgClass} border text-xs font-bold`;
+        }
+
+        function loadScenario(scenarioType) {
+            const stateKey = document.getElementById('stateSelect').value;
+            const hubKey = document.getElementById('regionSelect').value;
+            const reg = statesData[stateKey].hubs[hubKey];
+
+            if (scenarioType === 'flashflood') {
+                document.getElementById('inputType').value = 'sensor';
+                toggleInputFields();
+                document.getElementById('sensorSlider').value = '6.4';
+                document.getElementById('sensorVal').innerText = '6.4m';
+                triggerObservation(`Scenario: Flash Flood in ${reg.name}, ${statesData[stateKey].name} (River Sensor at ${reg.disasterName} reading 6.4m - Severe Danger Level).`, 'CRITICAL (Level 4/5)', 'text-rose-400', 'bg-rose-950/60 border-rose-800');
+            } else if (scenarioType === 'thunderstorm') {
+                document.getElementById('inputType').value = 'image';
+                toggleInputFields();
+                simulateImageUpload();
+                triggerObservation(`Scenario: Severe Thunderstorm & Fallen Tree obstruction reported near ${reg.name}, ${statesData[stateKey].name} main corridor.`, 'HIGH (Level 3/5)', 'text-amber-400', 'bg-amber-950/60 border-amber-800');
+            } else if (scenarioType === 'haze') {
+                document.getElementById('inputType').value = 'sos';
+                toggleInputFields();
+                document.getElementById('sosText').value = `URGENT: Air Pollutant Index (API) spiked to 215 (Very Unhealthy) in ${reg.name}. Elderly and asthma patients require immediate N95 mask distribution at PPS centers.`;
+                triggerObservation(`Scenario: Hazardous Haze Spike in ${reg.name}, ${statesData[stateKey].name} district (API 215).`, 'MODERATE-HIGH (Level 3/5)', 'text-purple-400', 'bg-purple-950/60 border-purple-800');
+            } else if (scenarioType === 'outage') {
+                document.getElementById('inputType').value = 'sensor';
+                toggleInputFields();
+                document.getElementById('sensorSlider').value = '0.0';
+                document.getElementById('sensorVal').innerText = 'Grid Down';
+                triggerObservation(`Scenario: Electrical Substation Failure in ${reg.name}, ${statesData[stateKey].name}. Local water treatment & clinic operating on emergency backup generators.`, 'CRITICAL (Level 4/5)', 'text-rose-400', 'bg-rose-950/60 border-rose-800');
+            } else if (scenarioType === 'fire') {
+                document.getElementById('inputType').value = 'image';
+                toggleInputFields();
+                simulateImageUpload();
+                triggerObservation(`Scenario: Peatland & Bush Fire detected near residential outskirts in ${reg.name}, ${statesData[stateKey].name}. Smoke spreading rapidly.`, 'SEVERE (Level 4/5)', 'text-orange-400', 'bg-orange-950/60 border-orange-800');
+            } else if (scenarioType === 'landslide') {
+                document.getElementById('inputType').value = 'sos';
+                toggleInputFields();
+                document.getElementById('sosText').value = `URGENT: Hillside slope movement detected near housing estate in ${reg.name}. Road blocked by mud and debris.`;
+                triggerObservation(`Scenario: Hillside Landslide reported near ${reg.name}, ${statesData[stateKey].name} residential perimeter.`, 'CRITICAL (Level 5/5)', 'text-rose-500', 'bg-rose-950/80 border-rose-700');
+            } else if (scenarioType === 'stormsurge') {
+                document.getElementById('inputType').value = 'sensor';
+                toggleInputFields();
+                document.getElementById('sensorSlider').value = '7.2';
+                document.getElementById('sensorVal').innerText = '7.2m Surge';
+                triggerObservation(`Scenario: Coastal Storm Surge & High Spring Tide in ${reg.name}, ${statesData[stateKey].name} waterfront zone. Seawater breaching coastal barriers.`, 'CRITICAL (Level 5/5)', 'text-sky-400', 'bg-sky-950/80 border-sky-700');
+            } else if (scenarioType === 'dengue') {
+                document.getElementById('inputType').value = 'sos';
+                toggleInputFields();
+                document.getElementById('sosText').value = `HEALTH ALERT: Post-flood stagnant water pooling detected across 14 housing blocks in ${reg.name}, ${statesData[stateKey].name}. Fogging and larvicide deployment needed.`;
+                triggerObservation(`Scenario: Post-Flood Vector & Dengue Outbreak Risk in ${reg.name}, ${statesData[stateKey].name}.`, 'ELEVATED (Level 2/5)', 'text-emerald-300', 'bg-emerald-950/60 border-emerald-800');
+            }
+        }
+
+        function resetSystem() {
+            setAgentStatus('STANDBY', 'standby');
+            setThreatLevel('IDLE', 'text-slate-400', 'bg-slate-900 border-slate-700');
+            document.getElementById('thinkingLogBox').innerHTML = '<div class="text-slate-500 italic">// Awaiting observation stream. Select a scenario or trigger ingestion to initialize agent reasoning loop...</div>';
+            document.getElementById('completedCount').innerText = "0/3";
+            
+            for (let i = 1; i <= 3; i++) {
+                document.getElementById(`badge${i}`).innerText = "PENDING";
+                document.getElementById(`badge${i}`).className = "text-xs px-3.5 py-1.5 rounded-xl bg-slate-800 text-slate-300 mono font-bold";
+                document.getElementById(`output${i}`).innerText = "Ready for execution...";
+                document.getElementById(`output${i}`).className = "text-xs bg-slate-950 p-3.5 rounded-2xl border border-slate-800 text-slate-500 mono truncate shadow-inner";
+            }
+            lastExecutionData = {
+                tool1: { title: "Emergency Broadcast Tool", status: "PENDING", text: "Ready for dispatch..." },
+                tool2: { title: "GPS Route Optimizer", status: "PENDING", text: "Ready for routing..." },
+                tool3: { title: "Relief Inventory Allocator", status: "PENDING", text: "Ready for inventory sync..." }
+            };
+            const stateKey = document.getElementById('stateSelect').value;
+            const hubKey = document.getElementById('regionSelect').value;
+            initMap(stateKey, hubKey);
+        }
+
+        async function triggerObservation(customContext = null, threatText = 'CRITICAL (Level 4/5)', threatColor = 'text-rose-400', threatBg = 'bg-rose-950/60 border-rose-800') {
+            resetSystem();
+            const logBox = document.getElementById('thinkingLogBox');
+            
+            setAgentStatus('THINKING', 'thinking');
+            setThreatLevel(threatText, threatColor, threatBg);
+
+            let inputDesc = customContext;
+            if (!inputDesc) {
+                const type = document.getElementById('inputType').value;
+                if (type === 'sensor') {
+                    const val = document.getElementById('sensorSlider').value;
+                    inputDesc = `IoT Sensor Ingest: Water/Grid sensor reporting reading at ${val}.`;
+                } else if (type === 'image') {
+                    inputDesc = `Multimodal Image Ingest: Site damage photograph processed via computer vision.`;
+                } else {
+                    inputDesc = `Citizen SOS Ingest: "${document.getElementById('sosText').value || 'Emergency assistance requested.'}"`;
+                }
+            }
+
+            const stateKey = document.getElementById('stateSelect').value;
+            const hubKey = document.getElementById('regionSelect').value;
+            const reg = statesData[stateKey].hubs[hubKey];
+            const backupTown = reg.backupHub;
+
+            logBox.innerHTML = `<div class="text-cyan-400">[0.00s] OBSERVED: ${inputDesc}</div>`;
+            
+            // Step 1: Parsing & Severity
+            await new Promise(r => setTimeout(r, 650));
+            logBox.innerHTML += `<div class="text-purple-300 mt-3">[0.55s] STEP 1 (Reasoning): Parsing multimodal data streams & assessing district threat score...</div>`;
+            await new Promise(r => setTimeout(r, 500));
+            logBox.innerHTML += `<div class="text-slate-300 ml-4">-> Threat Level Verified: <strong class="${threatColor}">${threatText}</strong>. Autonomous action plan initiated.</div>`;
+            logBox.scrollTop = logBox.scrollHeight;
+
+            // Step 2: Resource Ledger Query & Backup Check
+            await new Promise(r => setTimeout(r, 700));
+            logBox.innerHTML += `<div class="text-purple-300 mt-3">[1.32s] STEP 2 (Reasoning): Querying local district warehouse & auditing inventory levels...</div>`;
+            await new Promise(r => setTimeout(r, 450));
+            
+            logBox.innerHTML += `<div class="text-amber-300 ml-4">-> Local Ledger Warning: Local stock threshold at 15%. Initiating cross-district backup protocol with <strong class="text-cyan-300">${backupTown}</strong>...</div>`;
+            await new Promise(r => setTimeout(r, 400));
+            
+            const randVans = 15;
+            const randBoats = 8;
+            const randPacks = 450;
+            
+            logBox.innerHTML += `<div class="text-emerald-400 ml-4">-> Backup Secured: <strong class="text-cyan-300">${randVans} rescue vans en-route from ${backupTown}</strong>, plus ${randBoats} utility boats & ${randPacks} food packs dispatched.</div>`;
+            logBox.scrollTop = logBox.scrollHeight;
+
+            // Step 3: Execution Plan Generation
+            await new Promise(r => setTimeout(r, 700));
+            logBox.innerHTML += `<div class="text-purple-300 mt-3">[2.10s] STEP 3 (Reasoning): Synthesizing optimized multi-step execution DAG with cross-district logistics...</div>`;
+            await new Promise(r => setTimeout(r, 500));
+            logBox.innerHTML += `<div class="text-emerald-400 ml-4">-> Plan Synthesized: 3 Autonomous Tool Calls dispatched in parallel.</div>`;
+            logBox.scrollTop = logBox.scrollHeight;
+
+            setAgentStatus('EXECUTING', 'executing');
+
+            const randResidents = Math.floor(Math.random() * 1500 + 1200);
+            const broadcastText = `Dispatched automated emergency SMS and NADMA warnings to ${randResidents} residents and 22 district response officers.`;
+            const routeText = `Re-routing ${randVans} backup rescue vans from ${backupTown} and local utility fleets around flooded roadblocks.`;
+            const inventoryText = `Local stock deficit mitigated: ${randVans} rescue vans, ${randBoats} boats, and ${randPacks} backup food packs en-route from ${backupTown} warehouse.`;
+
+            lastExecutionData.tool1 = { title: "Emergency Broadcast Tool", status: "RESOLVED", text: broadcastText };
+            lastExecutionData.tool2 = { title: "GPS Route Optimizer", status: "RESOLVED", text: routeText };
+            lastExecutionData.tool3 = { title: "Relief Inventory Allocator", status: "RESOLVED", text: inventoryText };
+
+            // Execute Tool 1: Broadcast
+            await new Promise(r => setTimeout(r, 500));
+            updateToolStatus(1, 'EXECUTING', 'Broadcasting SMS & NADMA alerts...', 'border-cyan-500');
+            await new Promise(r => setTimeout(r, 900));
+            updateToolStatus(1, 'RESOLVED', broadcastText, 'text-emerald-400 border-emerald-800 bg-emerald-950/20');
+            
+            // Execute Tool 2: GPS Route Optimizer
+            await new Promise(r => setTimeout(r, 400));
+            updateToolStatus(2, 'EXECUTING', 'Re-routing past flooded arteries & backup convoys...', 'border-emerald-500');
+            await new Promise(r => setTimeout(r, 900));
+            updateToolStatus(2, 'RESOLVED', routeText, 'text-emerald-400 border-emerald-800 bg-emerald-950/20');
+            
+            routeLine.setLatLngs([
+                reg.disasterCoords,
+                [reg.lat + (Math.random() * 0.008 - 0.004), reg.lng + (Math.random() * 0.008 - 0.004)],
+                reg.relief2
+            ]);
+
+            // Execute Tool 3: Relief Inventory Allocator
+            await new Promise(r => setTimeout(r, 400));
+            updateToolStatus(3, 'EXECUTING', 'Allocating supplies & backup transit...', 'border-amber-500');
+            await new Promise(r => setTimeout(r, 900));
+            updateToolStatus(3, 'RESOLVED', inventoryText, 'text-emerald-400 border-emerald-800 bg-emerald-950/20');
+
+            document.getElementById('completedCount').innerText = "3/3";
+            setAgentStatus('ACTIVE (STANDBY)', 'complete');
+            
+            logBox.innerHTML += `<div class="text-cyan-400 mt-4 font-bold">[3.85s] AGENTIC LOOP COMPLETE: All actions executed, including cross-district backup dispatch from ${backupTown}. Click any execution card above to view full telemetry.</div>`;
+            logBox.scrollTop = logBox.scrollHeight;
+        }
+
+        function updateToolStatus(id, status, text, styleClass) {
+            const badge = document.getElementById(`badge${id}`);
+            const output = document.getElementById(`output${id}`);
+
+            badge.innerText = status;
+            if (status === 'EXECUTING') {
+                badge.className = "text-xs px-3.5 py-1.5 rounded-xl bg-cyan-950 text-cyan-400 border border-cyan-800 mono font-bold animate-pulse";
+            } else if (status === 'RESOLVED') {
+                badge.className = "text-xs px-3.5 py-1.5 rounded-xl bg-emerald-950 text-emerald-400 border border-emerald-800 mono font-bold";
+            }
+            output.innerText = text;
+            output.className = `text-xs bg-slate-950 p-3.5 rounded-2xl border text-slate-200 mono truncate shadow-inner ${styleClass.includes('emerald') ? 'border-emerald-800/80 bg-emerald-950/25' : 'border-slate-800'}`;
+        }
+    </script>
+</body>
+</html>
